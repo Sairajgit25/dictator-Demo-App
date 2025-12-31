@@ -1,19 +1,18 @@
-
 import React, { useState, useEffect } from 'react';
 import { HashRouter } from 'react-router-dom';
-import BottomNav from './components/BottomNav';
-import Header from './components/Header';
-import AuthModal from './components/AuthModal';
-import Dashboard from './pages/Dashboard';
-import Blocklist from './pages/Blocklist';
-import Learning from './pages/Learning';
-import Habits from './pages/Habits';
-import Settings from './pages/Settings';
-import Onboarding from './components/Onboarding';
-import Login from './pages/Login';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { requestNotificationPermission, sendNotification } from './services/notificationService';
-import { COLORS } from './constants';
+import BottomNav from './dictator-app/src/components/BottomNav';
+import Header from './dictator-app/src/components/Header';
+import AuthModal from './dictator-app/src/components/AuthModal';
+import Dashboard from './dictator-app/src/pages/Dashboard';
+import Blocklist from './dictator-app/src/pages/Blocklist';
+import Learning from './dictator-app/src/pages/Learning';
+import Habits from './dictator-app/src/pages/Habits';
+import Settings from './dictator-app/src/pages/Settings';
+import Onboarding from './dictator-app/src/components/Onboarding';
+import Login from './dictator-app/src/pages/Login';
+import { AuthProvider, useAuth } from './dictator-app/src/contexts/AuthContext';
+import { requestNotificationPermission, sendNotification } from './dictator-app/src/services/notificationService';
+import { COLORS } from './dictator-app/src/constants';
 
 const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');

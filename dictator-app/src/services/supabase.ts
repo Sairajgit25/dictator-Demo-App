@@ -1,19 +1,24 @@
-
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase configuration - ensure these match your Supabase project settings
-const supabaseUrl = 'https://wvcbdfzmxazvwopwqijz.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2Y2JkZnpteGF6dndvcHdxaWp6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NjcyODIsImV4cCI6MjA4MjM0MzI4Mn0.Ctu19rwh7J8cvXYHrShvTrWGq_9l5R9vvlQwvs5GTXc';
+// Access environment variables
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Missing Supabase Environment Variables! Check your .env file.');
+}
+
+// Create the client with the environment variables
+export const supabase = createClient(
+  supabaseUrl || '', 
+  supabaseAnonKey || ''
+);
 
 /**
  * Helper to log Supabase errors descriptively.
- * This prevents the generic [object Object] output by stringifying the error or accessing its message.
  */
 const logSupabaseError = (context: string, error: any) => {
   if (!error) return;
-  
   const errorMessage = error.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
   const errorDetails = error.details ? ` | Details: ${error.details}` : '';
   const errorCode = error.code ? ` [${error.code}]` : '';
@@ -25,7 +30,6 @@ export const supabaseService = {
   // Sync user to our database
   async syncUser(firebaseUser: any) {
     try {
-      // Upsert user profile
       const { data, error } = await supabase
         .from('users')
         .upsert({
@@ -40,7 +44,6 @@ export const supabaseService = {
         logSupabaseError('Error syncing user to Supabase', error);
         return null;
       }
-
       return data;
     } catch (error) {
       console.error('Unexpected error in syncUser:', error);
@@ -76,7 +79,6 @@ export const supabaseService = {
         }
         return newData;
       }
-
       return userData;
     } catch (error) {
       console.error('Unexpected error in loadUserData:', error);
