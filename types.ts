@@ -36,12 +36,6 @@ export interface LearningModule {
     correctIndex: number;
     explanation?: string;
   };
-  systemMasteryQuiz?: {
-    question: string;
-    options: string[];
-    correctIndex: number;
-    explanation?: string;
-  }[];
 }
 
 export type ThemeColor = 'lime' | 'teal' | 'gold' | 'olive' | 'pale' | 'dark';
@@ -60,6 +54,8 @@ export interface UserData {
   habits: Habit[];
   settings: UserSettings;
   completedModules: string[];
+  customModules: LearningModule[];
+  masteryQuizzes: Record<string, any[]>; // Stores generated questions per module ID
   hasOnboarded: boolean;
 }
 

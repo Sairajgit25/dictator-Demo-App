@@ -1,24 +1,28 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize Gemini API with the key directly from process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Note: In a production app, the API key would come from a secure backend or env var.
+// For this frontend demo, we assume it's available via process.env.API_KEY
+const apiKey = process.env.API_KEY || ''; 
+
+const ai = new GoogleGenAI({ apiKey });
 
 export const generateQuizForTopic = async (topic: string) => {
-  // Hard requirement: API key is assumed to be present in the environment
+  if (!apiKey) {
+    console.warn("No API Key found for Gemini");
+    return null;
+  }
+
   try {
     const response = await ai.models.generateContent({
-      // Using gemini-3-flash-preview for basic text and reasoning tasks
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: `Create a comprehensive micro-learning card about "${topic}".
       1. Provide a concise summary (max 3 sentences) explaining the core concept.
-      2. Categorize this topic into exactly ONE of these categories: 'Finance', 'Tech', 'Health', 'Science'.
-      3. Create a simple Mermaid.js diagram code (graph TD, graph LR, or sequenceDiagram) that visually explains the concept. 
+      2. Create a simple Mermaid.js diagram code (graph TD, graph LR, or sequenceDiagram) that visually explains the concept. 
          IMPORTANT SYNTAX RULES:
          - Use semicolons ';' to separate lines.
          - Enclose ALL node text in quotes to avoid syntax errors with special characters. Example: A["Node Label: Text"] --> B["Other Text"].
          - Do not include markdown code blocks (no \`\`\`).
-      4. Create a multiple-choice question to test understanding.
+      3. Create a multiple-choice question to test understanding.
       `,
       config: {
         responseMimeType: "application/json",
@@ -26,10 +30,6 @@ export const generateQuizForTopic = async (topic: string) => {
           type: Type.OBJECT,
           properties: {
             summary: { type: Type.STRING },
-            category: { 
-              type: Type.STRING,
-              description: "Must be one of: Finance, Tech, Health, Science"
-            },
             diagram: { type: Type.STRING },
             quiz: {
               type: Type.OBJECT,
@@ -43,13 +43,11 @@ export const generateQuizForTopic = async (topic: string) => {
                 explanation: { type: Type.STRING }
               }
             }
-          },
-          required: ["summary", "category", "diagram", "quiz"]
+          }
         }
       }
     });
 
-    // Access .text property directly
     return JSON.parse(response.text || '{}');
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -58,11 +56,17 @@ export const generateQuizForTopic = async (topic: string) => {
 };
 
 export const generateModuleQuiz = async (content: string) => {
+  if (!apiKey) {
+    console.warn("No API Key found for Gemini");
+    return null;
+  }
+
   try {
+    // Truncate content slightly to ensure it fits context window if very large, though usually fine.
     const cleanContent = content.substring(0, 8000);
     
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: `Generate a challenging 5-question multiple-choice quiz to test understanding of the following text. For each question, provide a 'question', 'options' array, 'correctIndex', and a helpful 'explanation' of why the answer is correct: "${cleanContent}"`,
       config: {
         responseMimeType: "application/json",
@@ -98,10 +102,15 @@ export const generateModuleQuiz = async (content: string) => {
 };
 
 export const generateSummary = async (content: string) => {
+  if (!apiKey) {
+    console.warn("No API Key found for Gemini");
+    return null;
+  }
+
   try {
     const cleanContent = content.substring(0, 8000);
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: `Summarize the following educational content into one concise, engaging paragraph (approx 2-3 sentences) suitable for a mobile learning app: "${cleanContent}"`,
     });
 
@@ -113,6 +122,11 @@ export const generateSummary = async (content: string) => {
 };
 
 export const generateImageForModule = async (title: string, summary: string) => {
+    if (!apiKey) {
+        console.warn("No API Key found for Gemini");
+        return null;
+    }
+
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
