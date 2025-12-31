@@ -1,5 +1,6 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
+import { MOCK_MODULES } from '../constants';
 import MermaidChart from '../components/MermaidChart';
 import { 
   CheckCircle, 
@@ -18,9 +19,7 @@ import {
   Activity,
   Maximize2,
   X,
-  FilePlus,
-  ArrowDown,
-  RotateCcw
+  FilePlus2
 } from 'lucide-react';
 import { 
   generateQuizForTopic, 
@@ -32,7 +31,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { LearningModule } from '../types';
 
 const Learning: React.FC = () => {
-  const { userData, markModuleComplete, user, saveAIModule, allModules } = useAuth();
+  const { userData, markModuleComplete, addCustomModule, saveMasteryQuiz, user } = useAuth();
   const [selectedModuleId, setSelectedModuleId] = useState<string | null>(null);
   const [quizAnswer, setQuizAnswer] = useState<number | null>(null);
   const [showExplanation, setShowExplanation] = useState(false);
@@ -44,7 +43,8 @@ const Learning: React.FC = () => {
   const [aiTopic, setAiTopic] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<any>(null);
-  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [isSavingModule, setIsSavingModule] = useState(false);
+  const [hasSavedAiResult, setHasSavedAiResult] = useState(false);
 
   // AI Module Quiz State
   const [moduleQuizData, setModuleQuizData] = useState<any[] | null>(null);
@@ -65,26 +65,28 @@ const Learning: React.FC = () => {
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [galleryImage, setGalleryImage] = useState<string | null>(null);
 
+  // Combine Mock Modules and User Custom Modules
+  const allModules = [...MOCK_MODULES, ...(userData.customModules || [])];
   const selectedModule = allModules.find(m => m.id === selectedModuleId);
 
-  // Helper to check progress for a specific module ID from localStorage
+  // Helper to check progress for a specific module ID from localStorage (Answers only)
   const getModuleQuizProgress = (moduleId: string) => {
     if (!user) return null;
-    const key = `dictator_quiz_${user.username}_${moduleId}`;
+    const key = `dictator_quiz_answers_${user.username}_${moduleId}`;
     const saved = localStorage.getItem(key);
-    if (saved) {
+    const questions = userData.masteryQuizzes[moduleId];
+    
+    if (questions && saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.data && parsed.answers) {
-          const answeredCount = Object.keys(parsed.answers).length;
-          const totalCount = parsed.data.length;
-          return {
-            answered: answeredCount,
-            total: totalCount,
-            percent: totalCount > 0 ? Math.round((answeredCount / totalCount) * 100) : 0,
-            isSubmitted: parsed.submitted
-          };
-        }
+        const answeredCount = Object.keys(parsed.answers || {}).length;
+        const totalCount = questions.length;
+        return {
+          answered: answeredCount,
+          total: totalCount,
+          percent: totalCount > 0 ? Math.round((answeredCount / totalCount) * 100) : 0,
+          isSubmitted: parsed.submitted
+        };
       } catch (e) {
         return null;
       }
@@ -94,42 +96,38 @@ const Learning: React.FC = () => {
 
   // Load saved AI quiz state when entering a module
   useEffect(() => {
-    if (selectedModuleId && user && selectedModule) {
-        // First priority: Check if the module already has a persistent AI quiz
-        if (selectedModule.systemMasteryQuiz) {
-            setModuleQuizData(selectedModule.systemMasteryQuiz);
+    if (selectedModuleId && user) {
+        // Prioritize data from userData.masteryQuizzes
+        const questions = userData.masteryQuizzes[selectedModuleId];
+        if (questions) {
+            setModuleQuizData(questions);
         }
 
-        // Second: Load user-specific progress (answers)
-        const key = `dictator_quiz_${user.username}_${selectedModuleId}`;
+        // Load answers from localStorage
+        const key = `dictator_quiz_answers_${user.username}_${selectedModuleId}`;
         const saved = localStorage.getItem(key);
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
-                // Only override questions from storage if the module itself doesn't have them
-                if (parsed.data && !selectedModule.systemMasteryQuiz) {
-                    setModuleQuizData(parsed.data);
-                }
                 if (parsed.answers) setModuleQuizAnswers(parsed.answers);
                 if (parsed.submitted !== undefined) setModuleQuizSubmitted(parsed.submitted);
             } catch (e) {
-                console.error("Error loading quiz state", e);
+                console.error("Error loading quiz answers", e);
             }
         }
     }
-  }, [selectedModuleId, user, selectedModule]);
+  }, [selectedModuleId, user, userData.masteryQuizzes]);
 
-  // Persist AI quiz answers when they change (questions are persisted via Supabase/AuthContext)
+  // Persist AI quiz ANSWERS when they change
   useEffect(() => {
     if (selectedModuleId && user && moduleQuizData) {
-         const key = `dictator_quiz_${user.username}_${selectedModuleId}`;
+         const key = `dictator_quiz_answers_${user.username}_${selectedModuleId}`;
          localStorage.setItem(key, JSON.stringify({
-             data: moduleQuizData,
              answers: moduleQuizAnswers,
              submitted: moduleQuizSubmitted
          }));
     }
-  }, [selectedModuleId, user, moduleQuizData, moduleQuizAnswers, moduleQuizSubmitted]);
+  }, [selectedModuleId, user, moduleQuizAnswers, moduleQuizSubmitted, moduleQuizData]);
 
   // Filter modules based on search term
   const filteredModules = allModules.filter(module => {
@@ -168,48 +166,51 @@ const Learning: React.FC = () => {
     if(!aiTopic) return;
     setAiLoading(true);
     setAiResult(null);
-    setShowSuccessToast(false);
-    
+    setHasSavedAiResult(false);
     const result = await generateQuizForTopic(aiTopic);
-    
-    if (result) {
-      setAiResult(result);
-      // Save to Supabase via AuthContext
-      const newModule: LearningModule = {
-        id: `ai-${Date.now()}`,
-        title: aiTopic,
-        category: (result.category as any) || 'Tech', 
-        readTime: '2 min',
-        content: {
-          text: result.summary || '',
-        },
-        diagram: result.diagram,
-        quiz: result.quiz
-      };
-      
-      await saveAIModule(newModule);
-      setShowSuccessToast(true);
-      setAiTopic(''); // Clear input for next explore
-      
-      // Auto-hide success toast after 4s
-      setTimeout(() => setShowSuccessToast(false), 4000);
-    }
+    setAiResult(result);
     setAiLoading(false);
+  };
+
+  const handleSaveAiToLibrary = () => {
+    if (!aiResult || !aiTopic) return;
+    
+    setIsSavingModule(true);
+    
+    // Create a new module from AI result
+    const newModuleId = `custom-${Date.now()}`;
+    const newModule: LearningModule = {
+        id: newModuleId,
+        title: aiTopic.charAt(0).toUpperCase() + aiTopic.slice(1),
+        category: 'Science', // Default for AI explorer
+        readTime: 'Generated',
+        diagram: aiResult.diagram,
+        content: {
+            text: aiResult.summary || `A deeper dive into ${aiTopic}.`
+        },
+        quiz: aiResult.quiz
+    };
+
+    addCustomModule(newModule);
+    
+    // Also save the generated exam if it exists (Explorer generates a single quiz part of the module)
+    // But for the Mastery Exam section to work, we can convert the explorer result into a small mastery set if needed
+    // For now, explorer results are mainly modules with built-in baseline quizzes.
+    
+    setTimeout(() => {
+        setIsSavingModule(false);
+        setHasSavedAiResult(true);
+    }, 800);
   };
 
   const handleGenerateModuleQuiz = async () => {
     if (!selectedModule) return;
     setModuleQuizLoading(true);
     const questions = await generateModuleQuiz(selectedModule.content.text);
-    
-    // Save the questions to the module persistently
-    const updatedModule = {
-        ...selectedModule,
-        systemMasteryQuiz: questions
-    };
-    await saveAIModule(updatedModule);
-    
-    setModuleQuizData(questions);
+    if (questions && questions.length > 0) {
+        setModuleQuizData(questions);
+        saveMasteryQuiz(selectedModule.id, questions);
+    }
     setModuleQuizLoading(false);
   };
 
@@ -263,9 +264,14 @@ const Learning: React.FC = () => {
     setIsGalleryOpen(true);
   };
 
-  const scrollToLibrary = () => {
-    const el = document.getElementById('approved-protocols');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  const handleResetExamProgress = () => {
+      if (user && selectedModuleId) {
+          const key = `dictator_quiz_answers_${user.username}_${selectedModuleId}`;
+          localStorage.removeItem(key);
+      }
+      setModuleQuizAnswers({});
+      setModuleQuizSubmitted(false);
+      // NOTE: We DO NOT clear moduleQuizData, so it remains visible for re-attempt
   };
 
   if (selectedModule) {
@@ -326,6 +332,7 @@ const Learning: React.FC = () => {
         
         <h1 className="text-4xl font-serif font-black mb-6 leading-tight border-l-4 border-dictator-lime pl-4">{selectedModule.title}</h1>
 
+        {/* AI Summary Section */}
         <div className="mb-8">
             {!summary && !isSummarizing && (
                 <button 
@@ -361,6 +368,7 @@ const Learning: React.FC = () => {
           <p>{selectedModule.content.text}</p>
         </div>
 
+        {/* Visuals: Diagram OR Image */}
         <div className="mb-10">
           <h3 className="font-sans font-black mb-4 text-gray-400 uppercase text-[10px] tracking-[0.3em]">Operational Visualization</h3>
           {selectedModule.diagram ? (
@@ -373,6 +381,7 @@ const Learning: React.FC = () => {
                       <div className="w-full group">
                           <div className="relative overflow-hidden rounded-xl border-2 border-black/5">
                             <img src={activeImage} alt="Visual Concept" className="w-full h-auto object-cover max-h-80 animate-fade-in" />
+                            {/* Overlay Maximize Button */}
                             <button 
                                 onClick={() => openGallery(activeImage)}
                                 className="absolute bottom-4 right-4 p-3 bg-white text-black border-2 border-black rounded-xl shadow-[4px_4px_0_0_#000] opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0 transition-all duration-300 hover:bg-dictator-lime active:scale-90"
@@ -424,6 +433,7 @@ const Learning: React.FC = () => {
           )}
         </div>
 
+        {/* Existing Static Quiz */}
         {selectedModule.quiz && (
           <div className="mt-12 p-8 bg-dictator-pale rounded-2xl border-4 border-black shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
             <h3 className="font-black text-2xl mb-6 flex items-center gap-3 uppercase tracking-tighter">
@@ -463,6 +473,7 @@ const Learning: React.FC = () => {
           </div>
         )}
 
+        {/* AI Generated Module Quiz (Mastery Exam) */}
         <div className="mt-20 border-t-4 border-black pt-12">
            {!moduleQuizData && !moduleQuizLoading && (
              <div className="text-center p-10 bg-dictator-dark text-white rounded-[32px] shadow-[12px_12px_0px_0px_#AFFC41] border-4 border-black overflow-hidden relative">
@@ -562,21 +573,12 @@ const Learning: React.FC = () => {
                  )})}
                </div>
                
-               {moduleQuizSubmitted && (
-                 <button 
-                    onClick={() => {
-                        // Resetting only user progress/answers, NOT the questions
-                        if (user && selectedModuleId) {
-                            localStorage.removeItem(`dictator_quiz_${user.username}_${selectedModuleId}`);
-                        }
-                        setModuleQuizAnswers({});
-                        setModuleQuizSubmitted(false);
-                    }}
-                    className="w-full mt-10 py-5 bg-white text-black border-4 border-black font-black text-xl rounded-2xl hover:bg-gray-50 shadow-[6px_6px_0px_0px_#000] active:shadow-none active:translate-y-1 transition-all uppercase flex items-center justify-center gap-2"
-                 >
-                    <RotateCcw size={20} /> Reattempt Protocol Exam
-                 </button>
-               )}
+               <button 
+                  onClick={handleResetExamProgress}
+                  className="w-full mt-10 py-5 bg-white text-black border-4 border-black font-black text-xl rounded-2xl hover:bg-gray-50 shadow-[6px_6px_0px_0px_#000] active:shadow-none active:translate-y-1 transition-all uppercase"
+               >
+                  Reset Exam Progress
+               </button>
              </div>
            )}
         </div>
@@ -591,6 +593,7 @@ const Learning: React.FC = () => {
         <p className="text-gray-500 font-bold uppercase text-[10px] tracking-widest">Expend resources. Gain willpower.</p>
       </div>
 
+      {/* Search Bar */}
       <div className="relative mb-10 group">
         <input 
           type="text"
@@ -602,6 +605,7 @@ const Learning: React.FC = () => {
         <Search className="absolute left-5 top-1/2 transform -translate-y-1/2 text-gray-400 group-focus-within:text-dictator-teal transition-colors" size={24} />
       </div>
 
+      {/* AI Topic Explorer */}
       <div className="mb-12 bg-dictator-dark text-white p-6 rounded-[32px] border-4 border-black shadow-[8px_8px_0px_0px_#AFFC41] relative overflow-hidden">
          <div className="absolute top-[-10%] right-[-10%] p-4 text-dictator-lime opacity-5">
             <BrainCircuit size={120} />
@@ -610,13 +614,11 @@ const Learning: React.FC = () => {
             <BrainCircuit size={28} /> AI Topic Explorer
          </h2>
          <p className="text-sm text-gray-300 mb-6 font-medium leading-relaxed relative z-10">Forge immediate understanding of any concept. The engine generates summaries, logical structures, and evaluations in real-time.</p>
-         
          <div className="flex gap-3 mb-6 relative z-10">
            <input 
               type="text" 
               value={aiTopic}
               onChange={(e) => setAiTopic(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAiGenerate()}
               placeholder="Topic name (e.g. Stoicism)"
               className="flex-1 px-4 py-3 rounded-xl border-none text-black focus:ring-4 ring-dictator-lime font-black placeholder:text-gray-300"
            />
@@ -629,31 +631,24 @@ const Learning: React.FC = () => {
            </button>
          </div>
 
-         {/* Success Toast */}
-         {showSuccessToast && (
-             <div className="mb-6 p-4 bg-dictator-lime/20 border-2 border-dictator-lime rounded-xl flex items-center justify-between animate-fade-in">
-                 <div className="flex items-center gap-3">
-                    <FilePlus className="text-dictator-lime" size={20} />
-                    <span className="text-xs font-black uppercase tracking-tight text-white">Module Saved to Library</span>
-                 </div>
-                 <button 
-                    onClick={scrollToLibrary}
-                    className="flex items-center gap-1 text-[10px] font-black uppercase text-dictator-lime hover:underline"
-                 >
-                    View <ArrowDown size={12} />
-                 </button>
-             </div>
-         )}
-
          {aiResult && (
            <div className="mt-6 animate-fade-in space-y-6 relative z-10">
-             <div className="flex items-center justify-between">
-                <div className="bg-dictator-lime text-black text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">
-                    ACTIVE DECODING
-                </div>
-                <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
-                    Source: Gemini Neural Engine
-                </span>
+             <div className="flex flex-col gap-4">
+                {!hasSavedAiResult ? (
+                    <button 
+                        onClick={handleSaveAiToLibrary}
+                        disabled={isSavingModule}
+                        className="w-full py-3 bg-white text-black font-black rounded-xl border-2 border-black shadow-[4px_4px_0_0_#AFFC41] active:translate-y-1 active:shadow-none transition-all uppercase flex items-center justify-center gap-2 text-sm"
+                    >
+                        {isSavingModule ? <Loader2 className="animate-spin" /> : <FilePlus2 size={18} />}
+                        {isSavingModule ? 'ARCHIVING...' : 'Deploy to Neural Library'}
+                    </button>
+                ) : (
+                    <div className="w-full py-3 bg-dictator-teal text-black font-black rounded-xl border-2 border-black flex items-center justify-center gap-2 text-sm animate-fade-in">
+                        <Check size={18} strokeWidth={4} />
+                        ASSET ARCHIVED IN LIBRARY
+                    </div>
+                )}
              </div>
 
              {aiResult.summary && (
@@ -696,13 +691,13 @@ const Learning: React.FC = () => {
          )}
       </div>
 
-      <div className="grid gap-8" id="approved-protocols">
+      <div className="grid gap-8">
         <h2 className="font-black text-xs text-gray-400 uppercase tracking-[0.4em] mb-[-12px]">Approved Protocols</h2>
         {filteredModules.length > 0 ? (
-            filteredModules.map((module, mIdx) => {
+            filteredModules.map(module => {
                 const isComplete = completedModules.has(module.id);
                 const quizProgress = getModuleQuizProgress(module.id);
-                const isNewlyAdded = module.id.startsWith('ai-');
+                const isCustom = module.id.startsWith('custom-');
                 
                 return (
                     <div 
@@ -712,7 +707,7 @@ const Learning: React.FC = () => {
                             isComplete 
                               ? 'bg-green-50 shadow-[6px_6px_0px_0px_#1DD3B0] border-dictator-teal' 
                               : 'bg-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]'
-                        } ${isNewlyAdded ? 'animate-fade-in' : ''}`}
+                        }`}
                     >
                         {isComplete && (
                           <div className="absolute top-0 right-0 w-24 h-24 bg-dictator-teal/5 rounded-full translate-x-12 translate-y-[-12px] flex items-end justify-start p-4">
@@ -725,9 +720,9 @@ const Learning: React.FC = () => {
                                 <span className={`px-3 py-1 text-[10px] font-black border-2 border-black rounded-lg uppercase tracking-tight ${isComplete ? 'bg-dictator-teal text-white' : 'bg-dictator-gold text-black'}`}>
                                     {module.category}
                                 </span>
-                                {isNewlyAdded && (
-                                    <span className="px-2 py-1 text-[10px] font-black border-2 border-black rounded-lg uppercase tracking-tight bg-dictator-lime text-black flex items-center gap-1">
-                                        <Sparkles size={10} /> AI Sync
+                                {isCustom && (
+                                    <span className="px-3 py-1 text-[10px] font-black bg-black text-white border-2 border-black rounded-lg uppercase tracking-tight flex items-center gap-1">
+                                        <BrainCircuit size={10} /> Neural Gen
                                     </span>
                                 )}
                             </div>
@@ -757,6 +752,7 @@ const Learning: React.FC = () => {
                           {module.content.text}
                         </p>
 
+                        {/* Progress Bar for active modules */}
                         {!isComplete && quizProgress && quizProgress.answered > 0 && (
                           <div className="mt-5 space-y-1.5">
                             <div className="flex justify-between text-[10px] font-black text-gray-400 uppercase tracking-widest">

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { Lock, Unlock, Search, Smartphone, Check, CheckSquare, Square, Clock, Hourglass, PlusCircle, ShieldAlert, Loader2, Play, ArrowLeft, AlertCircle, Zap } from 'lucide-react';
+import { Lock, Unlock, Search, Smartphone, Check, CheckSquare, Square, Clock, Hourglass, PlusCircle, ShieldAlert, Loader2, Play, ArrowLeft, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { sendNotification } from '../services/notificationService';
 import { AppDefinition } from '../types';
@@ -63,7 +63,7 @@ const HighlightedText = ({ text, highlights }: { text: string, highlights?: numb
   );
 };
 
-const SegmentedBar = ({ percent, isOverLimit, isGracePeriod }: { percent: number, isOverLimit: boolean, isGracePeriod: boolean }) => {
+const SegmentedBar = ({ percent, isOverLimit }: { percent: number, isOverLimit: boolean }) => {
   const segments = 10;
   const activeSegments = Math.ceil((percent / 100) * segments);
   
@@ -75,7 +75,6 @@ const SegmentedBar = ({ percent, isOverLimit, isGracePeriod }: { percent: number
         
         if (isActive) {
           if (isOverLimit) colorClass = "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]";
-          else if (isGracePeriod) colorClass = "bg-dictator-gold animate-pulse";
           else if (percent > 80) colorClass = "bg-dictator-gold shadow-[0_0_8px_rgba(254,228,64,0.5)]";
           else if (percent > 50) colorClass = "bg-dictator-olive shadow-[0_0_8px_rgba(185,231,105,0.5)]";
           else colorClass = "bg-dictator-teal shadow-[0_0_8px_rgba(29,211,176,0.5)]";
@@ -84,7 +83,7 @@ const SegmentedBar = ({ percent, isOverLimit, isGracePeriod }: { percent: number
         return (
           <div 
             key={i}
-            className={`flex-1 rounded-sm border border-black/10 transition-all duration-300 ${colorClass} ${isActive && !isOverLimit && !isGracePeriod ? 'animate-pulse' : ''}`}
+            className={`flex-1 rounded-sm border border-black/10 transition-all duration-300 ${colorClass} ${isActive && !isOverLimit ? 'animate-pulse' : ''}`}
             style={{ animationDelay: `${i * 100}ms`, animationDuration: '2s' }}
           >
             {isActive && (
@@ -107,7 +106,6 @@ const Blocklist: React.FC = () => {
   const [interventionApp, setInterventionApp] = useState<AppDefinition | null>(null);
   const [launchingApp, setLaunchingApp] = useState<AppDefinition | null>(null);
   const [isReclaiming, setIsReclaiming] = useState(false);
-  const [pendingBlocks, setPendingBlocks] = useState<Set<string>>(new Set());
 
   const apps = userData.apps;
 
@@ -129,39 +127,26 @@ const Blocklist: React.FC = () => {
   const simulateUsage = (id: string, minutes: number) => {
     const app = apps.find(a => a.id === id);
     if (!app) return;
-    
     const newUsage = app.dailyUsageMinutes + minutes;
     const isNowOverLimit = newUsage >= app.limitMinutes;
-    
-    // Always update usage immediately to reflect on UI bar
-    const appsWithNewUsage = apps.map(a => 
-        a.id === id ? { ...a, dailyUsageMinutes: newUsage } : a
-    );
-    updateApps(appsWithNewUsage);
-
-    if (isNowOverLimit && !app.isBlocked && !pendingBlocks.has(id)) {
-        // Start 3-second grace period before the block commits
-        setPendingBlocks(prev => new Set(prev).add(id));
-        
-        setTimeout(() => {
-            // Commit the block to state
-            const appsToBlock = apps.map(a => 
-                a.id === id ? { ...a, isBlocked: true } : a
-            );
-            updateApps(appsToBlock);
-            
-            setPendingBlocks(prev => {
-                const next = new Set(prev);
-                next.delete(id);
-                return next;
-            });
-
-            sendNotification(`🚫 Limit Reached: ${app.name}`, {
-                body: `Blocked for your own good. Redirecting to focus protocols.`,
-                requireInteraction: true,
-                tag: `block-${id}`
-            });
-        }, 3000); 
+    const shouldBlock = isNowOverLimit && !app.isBlocked;
+    const newApps = apps.map(a => {
+        if (a.id === id) {
+            return { 
+                ...a, 
+                dailyUsageMinutes: newUsage,
+                isBlocked: isNowOverLimit ? true : a.isBlocked 
+            };
+        }
+        return a;
+    });
+    updateApps(newApps);
+    if (shouldBlock) {
+        sendNotification(`🚫 Limit Reached: ${app.name}`, {
+            body: `Blocked for your own good. Redirecting to focus protocols.`,
+            requireInteraction: true,
+            tag: `block-${id}`
+        });
     }
   };
 
@@ -280,6 +265,12 @@ const Blocklist: React.FC = () => {
                         </>
                     )}
                 </button>
+                
+                {isReclaiming && (
+                    <div className="absolute -bottom-2 left-1 right-1 h-2 bg-gray-900 rounded-full border border-black overflow-hidden mt-2">
+                        <div className="h-full bg-dictator-teal transition-all duration-[1200ms] ease-linear w-0 group-data-[active=true]:w-full" style={{ width: '100%' }}></div>
+                    </div>
+                )}
              </div>
          </div>
       )}
@@ -365,7 +356,6 @@ const Blocklist: React.FC = () => {
         {filteredApps.map(app => {
           const usagePercent = Math.min(100, Math.floor((app.dailyUsageMinutes / app.limitMinutes) * 100));
           const isOverLimit = app.dailyUsageMinutes >= app.limitMinutes;
-          const isGracePeriod = pendingBlocks.has(app.id);
           const timeLeft = Math.max(0, app.limitMinutes - app.dailyUsageMinutes);
 
           return (
@@ -375,31 +365,18 @@ const Blocklist: React.FC = () => {
             className={`group flex flex-col p-5 rounded-2xl border-4 border-black transition-all cursor-pointer relative ${
               app.isBlocked 
                 ? 'bg-white shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]' 
-                : isGracePeriod 
-                  ? 'bg-dictator-gold/10 shadow-[6px_6px_0px_0px_#FEE440]'
-                  : 'bg-gray-100 hover:bg-gray-50'
+                : 'bg-gray-100 hover:bg-gray-50'
             } ${selectedIds.has(app.id) ? 'ring-4 ring-dictator-teal ring-offset-2' : ''}`}
           >
-            {/* Grace Period Indicator */}
-            {isGracePeriod && (
-                <div className="absolute top-[-14px] left-1/2 -translate-x-1/2 z-50 animate-bounce">
-                    <div className="bg-dictator-gold text-black border-2 border-black px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-[2px_2px_0_0_#000]">
-                        <Zap size={12} fill="currentColor" /> GRACE PERIOD ACTIVE
-                    </div>
-                </div>
-            )}
-
             {/* Absolute Launch Overlay */}
-            {!isGracePeriod && (
-                <div className="absolute top-[-14px] right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-[60]">
-                    <div className={`px-3 py-1.5 rounded-lg border-2 border-black flex items-center gap-2 shadow-[4px_4px_0_0_#000] scale-90 group-hover:scale-100 ${app.isBlocked ? 'bg-red-500' : 'bg-dictator-teal'}`}>
-                        <span className="text-[10px] font-black text-white uppercase tracking-tighter">
-                            {app.isBlocked ? 'BLOCKED' : 'LAUNCH'}
-                        </span>
-                        <Play size={10} fill="white" className="text-white" />
-                    </div>
+            <div className="absolute top-[-14px] right-2 opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-[60]">
+                <div className={`px-3 py-1.5 rounded-lg border-2 border-black flex items-center gap-2 shadow-[4px_4px_0_0_#000] scale-90 group-hover:scale-100 ${app.isBlocked ? 'bg-red-500' : 'bg-dictator-teal'}`}>
+                    <span className="text-[10px] font-black text-white uppercase tracking-tighter">
+                        {app.isBlocked ? 'BLOCKED' : 'LAUNCH'}
+                    </span>
+                    <Play size={10} fill="white" className="text-white" />
                 </div>
-            )}
+            </div>
 
             {/* Header Info */}
             <div className="flex items-center justify-between mb-5">
@@ -417,7 +394,7 @@ const Blocklist: React.FC = () => {
                     </button>
 
                     <div className="flex items-center gap-3 overflow-hidden flex-1">
-                        <div className={`shrink-0 p-3 rounded-xl border-2 border-black shadow-[2px_2px_0_0_#000] ${app.isBlocked ? 'bg-dictator-gold' : isGracePeriod ? 'bg-dictator-lime' : 'bg-gray-300'}`}>
+                        <div className={`shrink-0 p-3 rounded-xl border-2 border-black shadow-[2px_2px_0_0_#000] ${app.isBlocked ? 'bg-dictator-gold' : 'bg-gray-300'}`}>
                             <Smartphone size={20} strokeWidth={2.5} />
                         </div>
                         <div className="min-w-0">
@@ -446,7 +423,7 @@ const Blocklist: React.FC = () => {
                     <button 
                         onClick={(e) => { e.stopPropagation(); toggleBlock(app.id); }}
                         className={`shrink-0 p-2 rounded-lg border-4 border-black transition-all active:scale-95 shadow-[3px_3px_0_0_#000] active:shadow-none active:translate-y-1 ${
-                            app.isBlocked ? 'bg-red-400' : isGracePeriod ? 'bg-dictator-gold' : 'bg-dictator-lime'
+                            app.isBlocked ? 'bg-red-400' : 'bg-dictator-lime'
                         }`}
                     >
                         {app.isBlocked ? <Lock size={18} strokeWidth={3} /> : <Unlock size={18} strokeWidth={3} />}
@@ -487,22 +464,21 @@ const Blocklist: React.FC = () => {
                     <div className="flex flex-col">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Depletion Status</span>
                         <div className="flex items-center gap-1.5">
-                            <span className={`text-xl font-black italic tracking-tighter ${isOverLimit ? 'text-red-500' : isGracePeriod ? 'text-dictator-gold' : 'text-black'}`}>
+                            <span className={`text-xl font-black italic tracking-tighter ${isOverLimit ? 'text-red-500' : 'text-black'}`}>
                                 {usagePercent}% DEPLETED
                             </span>
                             {isOverLimit && <AlertCircle size={14} className="text-red-500 animate-pulse" />}
-                            {isGracePeriod && <Zap size={14} className="text-dictator-gold animate-pulse" />}
                         </div>
                     </div>
                     <div className="text-right">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Focus Remaining</span>
-                        <p className={`font-mono font-black text-sm ${isGracePeriod ? 'text-dictator-gold' : 'text-dictator-teal'}`}>
+                        <p className="font-mono font-black text-sm text-dictator-teal">
                             {timeLeft}m
                         </p>
                     </div>
                 </div>
 
-                <SegmentedBar percent={usagePercent} isOverLimit={isOverLimit} isGracePeriod={isGracePeriod} />
+                <SegmentedBar percent={usagePercent} isOverLimit={isOverLimit} />
 
                 <div className="flex justify-between items-center pt-1">
                     <div className="flex gap-4">
@@ -517,8 +493,7 @@ const Blocklist: React.FC = () => {
                     </div>
                     <button 
                         onClick={() => simulateUsage(app.id, 5)}
-                        disabled={isOverLimit || isGracePeriod}
-                        className="flex items-center gap-1 bg-black text-white px-3 py-1.5 rounded-lg text-[10px] font-black hover:bg-dictator-teal hover:text-black transition-all border-2 border-black active:scale-95 disabled:opacity-50"
+                        className="flex items-center gap-1 bg-black text-white px-3 py-1.5 rounded-lg text-[10px] font-black hover:bg-dictator-teal hover:text-black transition-all border-2 border-black active:scale-95"
                     >
                         <PlusCircle size={12} strokeWidth={3} /> LOG +5 MIN
                     </button>
@@ -540,7 +515,7 @@ const Blocklist: React.FC = () => {
             <ShieldAlert size={18} /> OPERATIONAL SIMULATION
         </h4>
         <p className="text-xs font-medium text-gray-600 leading-relaxed">
-            The power gauge monitors your cognitive depletion in real-time. Reaching 100% initiates a 3-second grace period before an automatic system-wide block of the target asset.
+            The power gauge monitors your cognitive depletion in real-time. Reaching 100% initiates an automatic system-wide block of the target asset.
         </p>
       </div>
     </div>

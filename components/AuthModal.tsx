@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { X, ArrowRight, UserPlus, LogIn, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -63,62 +62,60 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 space-y-4">
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {authError && (
-            <div className="bg-red-100 border-2 border-red-500 text-red-700 p-3 rounded-lg text-sm font-bold flex items-center gap-2 animate-fade-in">
+            <div className="bg-red-100 border-2 border-red-500 text-red-700 p-3 rounded-lg text-sm font-bold flex items-center gap-2">
               <AlertCircle size={16} /> {authError}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-black uppercase text-gray-500 mb-1">Email Address</label>
+          <div>
+            <label className="block text-xs font-black uppercase text-gray-500 mb-1">Email Address</label>
+            <input 
+              type="email"
+              required
+              className="w-full p-3 bg-gray-50 border-2 border-black rounded-lg focus:outline-none focus:ring-4 ring-dictator-teal transition-all font-bold"
+              placeholder="user@example.com"
+              value={formData.email}
+              onChange={e => setFormData({...formData, email: e.target.value})}
+            />
+          </div>
+
+          {isRegistering && (
+            <div className="animate-fade-in">
+              <label className="block text-xs font-black uppercase text-gray-500 mb-1">Callsign (Username)</label>
               <input 
-                type="email"
+                type="text"
                 required
                 className="w-full p-3 bg-gray-50 border-2 border-black rounded-lg focus:outline-none focus:ring-4 ring-dictator-teal transition-all font-bold"
-                placeholder="user@example.com"
-                value={formData.email}
-                onChange={e => setFormData({...formData, email: e.target.value})}
+                placeholder="Maverick"
+                value={formData.username}
+                onChange={e => setFormData({...formData, username: e.target.value})}
               />
             </div>
+          )}
 
-            {isRegistering && (
-              <div className="animate-fade-in">
-                <label className="block text-xs font-black uppercase text-gray-500 mb-1">Callsign (Username)</label>
-                <input 
-                  type="text"
-                  required
-                  className="w-full p-3 bg-gray-50 border-2 border-black rounded-lg focus:outline-none focus:ring-4 ring-dictator-teal transition-all font-bold"
-                  placeholder="Maverick"
-                  value={formData.username}
-                  onChange={e => setFormData({...formData, username: e.target.value})}
-                />
-              </div>
-            )}
+          <div>
+            <label className="block text-xs font-black uppercase text-gray-500 mb-1">Password</label>
+            <input 
+              type="password"
+              required
+              className="w-full p-3 bg-gray-50 border-2 border-black rounded-lg focus:outline-none focus:ring-4 ring-dictator-teal transition-all font-bold"
+              placeholder="••••••••"
+              value={formData.password}
+              onChange={e => setFormData({...formData, password: e.target.value})}
+            />
+          </div>
 
-            <div>
-              <label className="block text-xs font-black uppercase text-gray-500 mb-1">Password</label>
-              <input 
-                type="password"
-                required
-                className="w-full p-3 bg-gray-50 border-2 border-black rounded-lg focus:outline-none focus:ring-4 ring-dictator-teal transition-all font-bold"
-                placeholder="••••••••"
-                value={formData.password}
-                onChange={e => setFormData({...formData, password: e.target.value})}
-              />
-            </div>
-
-            <button 
-              type="submit"
-              disabled={loading}
-              className="w-full py-4 mt-2 bg-black text-white font-black text-lg rounded-xl shadow-[4px_4px_0px_0px_#1DD3B0] active:translate-y-1 active:shadow-none disabled:opacity-50 disabled:shadow-none transition-all flex items-center justify-center gap-2 group"
-            >
-              {loading ? 'PROCESSING...' : (isRegistering ? 'REGISTER' : 'LOGIN')}
-              {!loading && <ArrowRight className="group-hover:translate-x-1 transition-transform" strokeWidth={3} />}
-            </button>
-          </form>
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full py-4 mt-2 bg-black text-white font-black text-lg rounded-xl shadow-[4px_4px_0px_0px_#1DD3B0] active:translate-y-1 active:shadow-none disabled:opacity-50 disabled:shadow-none transition-all flex items-center justify-center gap-2 group"
+          >
+            {loading ? 'PROCESSING...' : (isRegistering ? 'REGISTER' : 'LOGIN')}
+            {!loading && <ArrowRight className="group-hover:translate-x-1 transition-transform" strokeWidth={3} />}
+          </button>
 
           <div className="pt-4 text-center border-t-2 border-gray-100">
             <p className="text-xs font-bold text-gray-500 mb-2">
@@ -132,7 +129,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               {isRegistering ? 'Login via Protocol' : 'Register New ID'}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

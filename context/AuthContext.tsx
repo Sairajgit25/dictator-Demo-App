@@ -1,22 +1,11 @@
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, UserData, AppDefinition, Habit, UserSettings, LearningModule } from '../types';
-import { MOCK_APPS, MOCK_HABITS, MOCK_SETTINGS, MOCK_MODULES } from '../constants';
-import { auth } from "../services/firebase";
-import { 
-  onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signOut, 
-  updateProfile
-} from "firebase/auth";
-import { supabaseService } from '../services/supabase';
+import { MOCK_APPS, MOCK_HABITS, MOCK_SETTINGS } from '../constants';
 
 interface AuthContextType {
   user: User | null;
   userData: UserData;
-  aiModules: LearningModule[];
-  allModules: LearningModule[];
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, username: string) => Promise<boolean>;
   logout: () => void;
@@ -24,8 +13,9 @@ interface AuthContextType {
   updateHabits: (habits: Habit[]) => void;
   updateSettings: (settings: UserSettings) => void;
   markModuleComplete: (moduleId: string) => void;
+  addCustomModule: (module: LearningModule) => void;
+  saveMasteryQuiz: (moduleId: string, questions: any[]) => void;
   completeOnboarding: () => void;
-  saveAIModule: (moduleData: LearningModule) => Promise<void>;
   authError: string | null;
 }
 
@@ -34,6 +24,8 @@ const defaultUserData: UserData = {
   habits: MOCK_HABITS,
   settings: MOCK_SETTINGS,
   completedModules: [],
+  customModules: [],
+  masteryQuizzes: {},
   hasOnboarded: false,
 };
 
@@ -42,247 +34,132 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userData, setUserData] = useState<UserData>(defaultUserData);
-  const [aiModules, setAiModules] = useState<LearningModule[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Merge mock modules with AI-augmented data
-  const allModules = useMemo(() => {
-    const merged = [...MOCK_MODULES];
-    aiModules.forEach(aiM => {
-      const index = merged.findIndex(m => m.id === aiM.id);
-      if (index > -1) {
-        // Overlay AI enhancements (like generated quizzes) on top of mock modules
-        merged[index] = { ...merged[index], ...aiM };
-      } else {
-        merged.push(aiM);
-      }
-    });
-    return merged;
-  }, [aiModules]);
-
-  // Handle Firebase Auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const currentUser: User = {
-          email: firebaseUser.email || '',
-          username: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User'
-        };
-        setUser(currentUser);
-        
-        // Sync user to Supabase
-        await supabaseService.syncUser(firebaseUser);
-        
-        // Load user data from Supabase
-        await loadUserData(firebaseUser.uid);
-        
-        // Load AI modules from Supabase
-        await loadAIModules(firebaseUser.uid);
-      } else {
-        setUser(null);
-        setUserData(defaultUserData);
-        setAiModules([]);
-      }
-    });
-
-    return () => unsubscribe();
+    // Check for active session
+    const session = localStorage.getItem('dictator_active_session');
+    if (session) {
+      const { email } = JSON.parse(session);
+      loadUserSession(email);
+    }
   }, []);
 
-  const loadUserData = async (uid: string) => {
-    const supabaseData = await supabaseService.loadUserData(uid);
-    
-    if (supabaseData) {
-      const mergedData: UserData = {
-        apps: supabaseData.apps || defaultUserData.apps,
-        habits: supabaseData.habits || defaultUserData.habits,
-        settings: supabaseData.settings || defaultUserData.settings,
-        completedModules: supabaseData.completed_modules || defaultUserData.completedModules,
-        hasOnboarded: supabaseData.has_onboarded || defaultUserData.hasOnboarded,
-      };
-      setUserData(mergedData);
-    } else {
-      // Fallback to localStorage if Supabase fails
-      const savedData = localStorage.getItem(`dictator_data_${uid}`);
-      if (savedData) {
-        setUserData(JSON.parse(savedData));
-      }
+  const loadUserSession = (email: string) => {
+    const db = JSON.parse(localStorage.getItem('dictator_users_db') || '{}');
+    if (db[email]) {
+      setUser({ email, username: db[email].username });
+      // Load user specific data or default
+      const savedData = localStorage.getItem(`dictator_data_${email}`);
+      const parsedData = savedData ? JSON.parse(savedData) : defaultUserData;
+      // Ensure customModules and masteryQuizzes exists in older saves
+      setUserData({ 
+        ...defaultUserData, 
+        ...parsedData, 
+        customModules: parsedData.customModules || [],
+        masteryQuizzes: parsedData.masteryQuizzes || {}
+      });
     }
   };
 
-  const loadAIModules = async (uid: string) => {
-    const modules = await supabaseService.loadAIModules(uid);
-    if (modules && modules.length > 0) {
-      const formattedModules: LearningModule[] = modules.map(m => ({
-        id: m.module_id,
-        title: m.title,
-        category: m.category as any,
-        readTime: '2 min',
-        content: m.content,
-        diagram: m.content?.diagram,
-        quiz: m.content?.quiz,
-        systemMasteryQuiz: m.content?.systemMasteryQuiz
-      }));
-      setAiModules(formattedModules);
-    }
-  };
-
-  const saveUserData = async (uid: string, data: Partial<UserData>) => {
-    try {
-      // Update Supabase
-      const updates: any = {};
-      if (data.apps) updates.apps = data.apps;
-      if (data.habits) updates.habits = data.habits;
-      if (data.settings) updates.settings = data.settings;
-      if (data.completedModules) updates.completed_modules = data.completedModules;
-      if (data.hasOnboarded !== undefined) updates.has_onboarded = data.hasOnboarded;
-
-      await supabaseService.updateUserData(uid, updates);
-      
-      // Update local state
-      setUserData(prev => ({ ...prev, ...data }));
-      
-      // Also keep localStorage as backup
-      localStorage.setItem(`dictator_data_${uid}`, JSON.stringify({ ...userData, ...data }));
-    } catch (error) {
-      console.error('Error saving to Supabase, using localStorage as fallback:', error);
-      // Fallback to localStorage
-      localStorage.setItem(`dictator_data_${uid}`, JSON.stringify({ ...userData, ...data }));
-      setUserData(prev => ({ ...prev, ...data }));
-    }
-  };
-
-  const handleAuthError = (error: any) => {
-    console.error("Firebase Auth Error:", error);
-    const code = error.code;
-    
-    if (code === 'auth/email-already-in-use') {
-      setAuthError("This email is already registered.");
-    } else if (code === 'auth/weak-password') {
-      setAuthError("Password should be at least 6 characters.");
-    } else if (code === 'auth/invalid-email') {
-      setAuthError("The email address is invalid.");
-    } else if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-      setAuthError("Invalid email or password.");
-    } else if (code === 'auth/unauthorized-domain') {
-      setAuthError(`Unauthorized Domain. Please add "${window.location.hostname}" to the "Authorized Domains" list in your Firebase Console (Authentication > Settings).`);
-    } else if (code === 'auth/configuration-not-found' || code === 'auth/operation-not-allowed') {
-      setAuthError("Identity Toolkit API not enabled or operation not allowed in Firebase Console.");
-    } else if (code === 'auth/network-request-failed') {
-      setAuthError("Network error. Check your connection.");
-    } else if (code === 'auth/popup-closed-by-user') {
-      setAuthError("Login window closed. Please try again.");
-    } else {
-      setAuthError(error.message || "An unexpected error occurred.");
-    }
+  const saveUserData = (email: string, data: UserData) => {
+    localStorage.setItem(`dictator_data_${email}`, JSON.stringify(data));
+    setUserData(data);
   };
 
   const register = async (email: string, password: string, username: string): Promise<boolean> => {
     setAuthError(null);
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, { displayName: username });
-        await supabaseService.syncUser(userCredential.user);
-        await saveUserData(userCredential.user.uid, defaultUserData);
-      }
-      return true;
-    } catch (error: any) {
-      handleAuthError(error);
+    const db = JSON.parse(localStorage.getItem('dictator_users_db') || '{}');
+    
+    if (db[email]) {
+      setAuthError("User already exists with this email.");
       return false;
     }
+
+    // Save user credentials
+    db[email] = { password, username };
+    localStorage.setItem('dictator_users_db', JSON.stringify(db));
+
+    // Initialize data for new user
+    saveUserData(email, defaultUserData);
+
+    // Auto login
+    return login(email, password);
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     setAuthError(null);
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
+    const db = JSON.parse(localStorage.getItem('dictator_users_db') || '{}');
+    const userRecord = db[email];
+
+    if (userRecord && userRecord.password === password) {
+      const userObj = { email, username: userRecord.username };
+      setUser(userObj);
+      localStorage.setItem('dictator_active_session', JSON.stringify({ email }));
+      loadUserSession(email);
       return true;
-    } catch (error: any) {
-      handleAuthError(error);
+    } else {
+      setAuthError("Invalid email or password.");
       return false;
     }
   };
 
-  const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Firebase Signout Error:", error);
-    }
+  const logout = () => {
+    setUser(null);
+    setUserData(defaultUserData);
+    localStorage.removeItem('dictator_active_session');
   };
 
-  const getUid = () => auth.currentUser?.uid;
-
+  // Data Update Wrappers
   const updateApps = (apps: AppDefinition[]) => {
-    const uid = getUid();
-    if (!uid) return;
-    saveUserData(uid, { apps });
+    if (!user) return;
+    const newData = { ...userData, apps };
+    saveUserData(user.email, newData);
   };
 
   const updateHabits = (habits: Habit[]) => {
-    const uid = getUid();
-    if (!uid) return;
-    saveUserData(uid, { habits });
+    if (!user) return;
+    const newData = { ...userData, habits };
+    saveUserData(user.email, newData);
   };
 
   const updateSettings = (settings: UserSettings) => {
-    const uid = getUid();
-    if (!uid) return;
-    saveUserData(uid, { settings });
+    if (!user) return;
+    const newData = { ...userData, settings };
+    saveUserData(user.email, newData);
   };
 
-  // Explicitly type the Set to Set<string> to ensure Array.from returns string[] and matches the UserData interface
   const markModuleComplete = (moduleId: string) => {
-    const uid = getUid();
-    if (!uid) return;
-    const completed = new Set<string>(userData.completedModules);
+    if (!user) return;
+    const completed = new Set(userData.completedModules);
     completed.add(moduleId);
-    saveUserData(uid, { completedModules: Array.from(completed) });
+    const newData = { ...userData, completedModules: Array.from(completed) };
+    saveUserData(user.email, newData);
+  };
+
+  const addCustomModule = (module: LearningModule) => {
+    if (!user) return;
+    const newData = { ...userData, customModules: [module, ...userData.customModules] };
+    saveUserData(user.email, newData);
+  };
+
+  const saveMasteryQuiz = (moduleId: string, questions: any[]) => {
+    if (!user) return;
+    const masteryQuizzes = { ...userData.masteryQuizzes, [moduleId]: questions };
+    const newData = { ...userData, masteryQuizzes };
+    saveUserData(user.email, newData);
   };
 
   const completeOnboarding = () => {
-    const uid = getUid();
-    if (!uid) return;
-    saveUserData(uid, { hasOnboarded: true });
-  };
-
-  const saveAIModule = async (moduleData: LearningModule) => {
-    const uid = getUid();
-    if (!uid) return;
-
-    try {
-      // Save to Supabase
-      await supabaseService.saveAIModule(uid, {
-        id: moduleData.id,
-        title: moduleData.title,
-        category: moduleData.category,
-        content: {
-          text: moduleData.content.text,
-          diagram: moduleData.diagram,
-          quiz: moduleData.quiz,
-          systemMasteryQuiz: moduleData.systemMasteryQuiz
-        }
-      });
-
-      // Update local state
-      setAiModules(prev => {
-        const exists = prev.find(m => m.id === moduleData.id);
-        if (exists) {
-          return prev.map(m => m.id === moduleData.id ? moduleData : m);
-        }
-        return [...prev, moduleData];
-      });
-    } catch (error) {
-      console.error('Error saving AI module:', error);
-    }
-  };
+    if (!user) return;
+    const newData = { ...userData, hasOnboarded: true };
+    saveUserData(user.email, newData);
+  }
 
   return (
     <AuthContext.Provider value={{
       user,
       userData,
-      aiModules,
-      allModules,
       login,
       register,
       logout,
@@ -290,8 +167,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updateHabits,
       updateSettings,
       markModuleComplete,
+      addCustomModule,
+      saveMasteryQuiz,
       completeOnboarding,
-      saveAIModule,
       authError
     }}>
       {children}
